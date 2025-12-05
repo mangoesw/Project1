@@ -4,7 +4,7 @@
 #include <strsafe.h>
 #include <vector>
 
-#define MAX_THREADS 2
+#define MAX_THREADS 1
 #define BUF_SIZE 255
 #define FSMOD pHotkey[i]->fsModifiers
 #define VK pHotkey[i]->vk
@@ -65,15 +65,10 @@ int _tmain()
 		pHotkey[i]->id = i;
         switch (i) {
             case 0:
-                FSMOD = MOD_SHIFT;
-				VK = 0x42; // 'b' key
-                AddKeyInput(INPUTS, 'A');
+                FSMOD = MOD_ALT;
+				VK = VK_OEM_3; // It can vary by keyboard. For the US ANSI keyboard, the Grave Accent and Tilde key
+                AddKeyInput(INPUTS, VK_OEM_PLUS);
                 break;
-            case 1:
-				FSMOD = MOD_ALT;
-                VK = 0x43; // 'c' key
-                AddKeyInput(INPUTS, 'C');
-				break;
         }
 
 
@@ -133,6 +128,18 @@ DWORD WINAPI HotkeyThread(LPVOID lpParam)
         // _tprintf(_T("Hotkey 'ALT+b' registered, using MOD_NOREPEAT flag\n"));
     }
 
+    INPUT test[1] = {};
+    ZeroMemory(test, sizeof(test));
+    test[0].type = INPUT_KEYBOARD;
+    test[0].ki.wVk = VK_MENU;
+    test[0].ki.dwFlags = KEYEVENTF_KEYUP;
+
+    INPUT down[1] = {};
+    ZeroMemory(down, sizeof(down));
+    down[0].type = INPUT_KEYBOARD;
+    down[0].ki.wVk = VK_MENU;
+
+
     INPUT* inputs = pHotkey->inputs.data();
     MSG msg = { 0 };
     while (GetMessage(&msg, NULL, 0, 0) != 0)
@@ -143,11 +150,13 @@ DWORD WINAPI HotkeyThread(LPVOID lpParam)
             // _tprintf(_T("WM_HOTKEY received\n"));
 
 			UINT cInputs = (UINT)pHotkey->inputs.size();
+            SendInput(1, test, sizeof(INPUT));
             UINT uSent = SendInput(cInputs, inputs, sizeof(INPUT));
             if (uSent != cInputs)
             {
                 scprintf(hStdout, TEXT("SendInput failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
             }
+            SendInput(1, down, sizeof(INPUT));
         }
     }
 
