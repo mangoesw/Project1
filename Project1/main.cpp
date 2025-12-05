@@ -2,13 +2,15 @@
 #include <windows.h>
 #include <tchar.h>
 #include <strsafe.h>
+#include <vector>
 
 #define MAX_THREADS 2
 #define BUF_SIZE 255
 #define FSMOD pHotkey[i]->fsModifiers
 #define VK pHotkey[i]->vk
+#define INPUTS pHotkey[i]->inputs
 
-DWORD WINAPI hotkeyThread(LPVOID lpParam);
+DWORD WINAPI HotkeyThread(LPVOID lpParam);
 void ErrorHandler(LPCTSTR lpszFunction);
 void scprintf(HANDLE hStdout, LPCTSTR format, ...);
 
@@ -17,7 +19,24 @@ typedef struct Hotkey {
     int id;
     UINT fsModifiers;
     UINT vk;
+	std::vector<INPUT> inputs;
 } HOTKEY, * PHOTKEY;
+
+
+void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp = false)
+{
+    INPUT input = {};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vk;
+    input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
+    inputs.push_back(input);
+}
+
+void AddKeyPress(std::vector<INPUT>& inputs, WORD vk)
+{
+    AddKeyInput(inputs, vk, false);  // Key down
+    AddKeyInput(inputs, vk, true);   // Key up
+}
 
 
 int _tmain()
@@ -46,12 +65,14 @@ int _tmain()
 		pHotkey[i]->id = i;
         switch (i) {
             case 0:
-                FSMOD = MOD_ALT;
+                FSMOD = MOD_SHIFT;
 				VK = 0x42; // 'b' key
+                AddKeyInput(INPUTS, 'A');
                 break;
             case 1:
 				FSMOD = MOD_ALT;
                 VK = 0x43; // 'c' key
+                AddKeyInput(INPUTS, 'C');
 				break;
         }
 
@@ -59,7 +80,7 @@ int _tmain()
         hThreadArray[i] = CreateThread(
             NULL,                   // default security attributes
             0,                      // use default stack size  
-            hotkeyThread,       // thread function name
+            HotkeyThread,       // thread function name
             pHotkey[i],          // argument to thread function 
             0,                      // use default creation flags 
             &dwThreadIdArray[i]);   // returns the thread identifier 
@@ -92,7 +113,7 @@ int _tmain()
 }
 
 
-DWORD WINAPI hotkeyThread(LPVOID lpParam)
+DWORD WINAPI HotkeyThread(LPVOID lpParam)
 {
     HANDLE hStdout;
 	PHOTKEY pHotkey = (PHOTKEY)lpParam;
@@ -112,6 +133,7 @@ DWORD WINAPI hotkeyThread(LPVOID lpParam)
         // _tprintf(_T("Hotkey 'ALT+b' registered, using MOD_NOREPEAT flag\n"));
     }
 
+    INPUT* inputs = pHotkey->inputs.data();
     MSG msg = { 0 };
     while (GetMessage(&msg, NULL, 0, 0) != 0)
     {
@@ -119,6 +141,13 @@ DWORD WINAPI hotkeyThread(LPVOID lpParam)
         {
             scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
             // _tprintf(_T("WM_HOTKEY received\n"));
+
+			UINT cInputs = (UINT)pHotkey->inputs.size();
+            UINT uSent = SendInput(cInputs, inputs, sizeof(INPUT));
+            if (uSent != cInputs)
+            {
+                scprintf(hStdout, TEXT("SendInput failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
+            }
         }
     }
 
