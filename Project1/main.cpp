@@ -1,25 +1,28 @@
+// https://learn.microsoft.com/en-us/windows/win32/procthread/creating-threads
 #include <windows.h>
 #include <tchar.h>
 #include <strsafe.h>
 
 #define MAX_THREADS 2
 #define BUF_SIZE 255
+#define FSMOD pHotkey[i]->fsModifiers
+#define VK pHotkey[i]->vk
 
-DWORD WINAPI registerHotkey(LPVOID lpParam);
+DWORD WINAPI hotkeyThread(LPVOID lpParam);
 void ErrorHandler(LPCTSTR lpszFunction);
+void scprintf(HANDLE hStdout, LPCTSTR format, ...);
 
-// This is passed by void pointer so it can be any data type
-// that can be passed using a single void pointer (LPVOID).
-typedef struct HotKeyArgs {
+
+typedef struct Hotkey {
     int id;
     UINT fsModifiers;
     UINT vk;
-} HOTKEYARGS, * PHOTKEYARGS;
+} HOTKEY, * PHOTKEY;
 
 
 int _tmain()
 {
-    PHOTKEYARGS pDataArray[MAX_THREADS];
+    PHOTKEY pHotkey[MAX_THREADS];
     DWORD   dwThreadIdArray[MAX_THREADS];
     HANDLE  hThreadArray[MAX_THREADS];
 
@@ -29,10 +32,10 @@ int _tmain()
     {
         // Allocate memory for thread data.
 
-        pDataArray[i] = (PHOTKEYARGS)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-            sizeof(HOTKEYARGS));
+        pHotkey[i] = (PHOTKEY)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+            sizeof(HOTKEY));
 
-        if (pDataArray[i] == NULL)
+        if (pHotkey[i] == NULL)
         {
             // If the array allocation fails, the system is out of memory
             // so there is no point in trying to print an error message.
@@ -40,31 +43,34 @@ int _tmain()
             ExitProcess(2);
         }
 
-		pDataArray[i]->id = i;
-        pDataArray[i]->fsModifiers = MOD_ALT;
-        pDataArray[i]->vk = i + 100;
+		pHotkey[i]->id = i;
+        switch (i) {
+            case 0:
+                FSMOD = MOD_ALT;
+				VK = 0x42; // 'b' key
+                break;
+            case 1:
+				FSMOD = MOD_ALT;
+                VK = 0x43; // 'c' key
+				break;
+        }
 
-        // Create the thread to begin execution on its own.
 
         hThreadArray[i] = CreateThread(
             NULL,                   // default security attributes
             0,                      // use default stack size  
-            registerHotkey,       // thread function name
-            pDataArray[i],          // argument to thread function 
+            hotkeyThread,       // thread function name
+            pHotkey[i],          // argument to thread function 
             0,                      // use default creation flags 
             &dwThreadIdArray[i]);   // returns the thread identifier 
 
-
-        // Check the return value for success.
-        // If CreateThread fails, terminate execution. 
-        // This will automatically clean up threads and memory. 
 
         if (hThreadArray[i] == NULL)
         {
             ErrorHandler(TEXT("CreateThread"));
             ExitProcess(3);
         }
-    } // End of main thread creation loop.
+    }
 
     // Wait until all threads have terminated.
 
@@ -75,10 +81,10 @@ int _tmain()
     for (int i = 0; i < MAX_THREADS; i++)
     {
         CloseHandle(hThreadArray[i]);
-        if (pDataArray[i] != NULL)
+        if (pHotkey[i] != NULL)
         {
-            HeapFree(GetProcessHeap(), 0, pDataArray[i]);
-            pDataArray[i] = NULL;    // Ensure address is not reused.
+            HeapFree(GetProcessHeap(), 0, pHotkey[i]);
+            pHotkey[i] = NULL;    // Ensure address is not reused.
         }
     }
 
@@ -86,17 +92,24 @@ int _tmain()
 }
 
 
-DWORD WINAPI registerHotkey(LPVOID lpParam)
+DWORD WINAPI hotkeyThread(LPVOID lpParam)
 {
-	PHOTKEYARGS pHotKeyArgs = (PHOTKEYARGS)lpParam;
+    HANDLE hStdout;
+	PHOTKEY pHotkey = (PHOTKEY)lpParam;
+
+    hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hStdout == INVALID_HANDLE_VALUE)
+        return 1;
 
     if (RegisterHotKey(
         NULL,
-        pHotKeyArgs->id,
-        pHotKeyArgs->fsModifiers,
-        pHotKeyArgs->vk))
+        pHotkey->id,
+        pHotkey->fsModifiers,
+        pHotkey->vk))
     {
-        _tprintf(_T("Hotkey 'ALT+b' registered, using MOD_NOREPEAT flag\n"));
+        scprintf(hStdout, TEXT("id = %d\nfsModifiers = %d\nvk = %d\n\n"),
+            pHotkey->id, pHotkey->fsModifiers, pHotkey->vk);
+        // _tprintf(_T("Hotkey 'ALT+b' registered, using MOD_NOREPEAT flag\n"));
     }
 
     MSG msg = { 0 };
@@ -104,7 +117,8 @@ DWORD WINAPI registerHotkey(LPVOID lpParam)
     {
         if (msg.message == WM_HOTKEY)
         {
-            _tprintf(_T("WM_HOTKEY received\n"));
+            scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
+            // _tprintf(_T("WM_HOTKEY received\n"));
         }
     }
 
@@ -145,4 +159,19 @@ void ErrorHandler(LPCTSTR lpszFunction)
 
     LocalFree(lpMsgBuf);
     LocalFree(lpDisplayBuf);
+}
+
+void scprintf(HANDLE hStdout, LPCTSTR format, ...)
+{
+    TCHAR msgBuf[BUF_SIZE];
+    size_t cchStringSize;
+    DWORD dwChars;
+    va_list args;
+
+    va_start(args, format);
+    StringCchVPrintf(msgBuf, BUF_SIZE, format, args);
+    va_end(args);
+
+    StringCchLength(msgBuf, BUF_SIZE, &cchStringSize);
+    WriteConsole(hStdout, msgBuf, (DWORD)cchStringSize, &dwChars, NULL);
 }
