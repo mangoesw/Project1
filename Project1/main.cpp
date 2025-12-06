@@ -4,8 +4,8 @@
 #include <strsafe.h>
 #include <vector>
 
-#define MAX_THREADS 1
-#define BUF_SIZE 255
+constexpr auto MAX_THREADS = 10;
+constexpr auto BUF_SIZE = 255;
 #define FSMOD pHotkey[i]->fsModifiers
 #define VK pHotkey[i]->vk
 #define INPUTS pHotkey[i]->inputs
@@ -31,11 +31,46 @@ void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp = false)
     input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
     inputs.push_back(input);
 }
-
 void AddKeyPress(std::vector<INPUT>& inputs, WORD vk)
 {
-    AddKeyInput(inputs, vk, false);  // Key down
-    AddKeyInput(inputs, vk, true);   // Key up
+    AddKeyInput(inputs, vk, false);
+    AddKeyInput(inputs, vk, true);
+}
+
+void AddUnicodeInput(std::vector<INPUT>& inputs, WCHAR wch, bool keyUp = false)
+{
+    INPUT input = {};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = 0;
+    input.ki.wScan = wch;
+    input.ki.dwFlags = KEYEVENTF_UNICODE | (keyUp ? KEYEVENTF_KEYUP : 0);
+    inputs.push_back(input);
+}
+void AddUnicodeChar(std::vector<INPUT>& inputs, WCHAR wch)
+{
+    AddUnicodeInput(inputs, wch, false);
+    AddUnicodeInput(inputs, wch, true);
+}
+void AddUnicodeString(std::vector<INPUT>& inputs, LPCWSTR str)
+{
+    while (*str)
+    {
+        WCHAR wch = *str++;
+        // Handle surrogate pairs for characters outside BMP (> U+FFFF)
+        if (wch >= 0xD800 && wch <= 0xDBFF && *str >= 0xDC00 && *str <= 0xDFFF)
+        {
+            // High surrogate followed by low surrogate
+            AddUnicodeInput(inputs, wch, false);
+            AddUnicodeInput(inputs, *str, false);
+            AddUnicodeInput(inputs, *str, true);
+            AddUnicodeInput(inputs, wch, true);
+            str++;
+        }
+        else
+        {
+            AddUnicodeChar(inputs, wch);
+        }
+    }
 }
 
 
@@ -45,14 +80,9 @@ int _tmain()
     DWORD   dwThreadIdArray[MAX_THREADS];
     HANDLE  hThreadArray[MAX_THREADS];
 
-    // Create MAX_THREADS worker threads.
-
     for (int i = 0; i < MAX_THREADS; i++)
     {
-        // Allocate memory for thread data.
-
-        pHotkey[i] = (PHOTKEY)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-            sizeof(HOTKEY));
+        pHotkey[i] = new HOTKEY();
 
         if (pHotkey[i] == NULL)
         {
@@ -66,9 +96,53 @@ int _tmain()
         switch (i) {
             case 0:
                 FSMOD = MOD_ALT;
-				VK = VK_OEM_3; // It can vary by keyboard. For the US ANSI keyboard, the Grave Accent and Tilde key
-                AddKeyInput(INPUTS, VK_OEM_PLUS);
+				VK = VK_OEM_6;
+				AddUnicodeString(INPUTS, L"=");
                 break;
+            case 1:
+                FSMOD = MOD_ALT | MOD_SHIFT;
+				VK = VK_OEM_4;
+                AddUnicodeString(INPUTS, L"+");
+				break;
+            case 2:
+                FSMOD = MOD_ALT;
+                VK = VK_BACK;
+				AddUnicodeString(INPUTS, L"\\");
+                break;
+            case 3:
+				FSMOD = MOD_ALT | MOD_SHIFT;
+				VK = VK_BACK;
+                AddUnicodeString(INPUTS, L"|");
+				break;
+            case 4:
+                FSMOD = MOD_ALT;
+                VK = VK_SNAPSHOT;
+				AddKeyPress(INPUTS, VK_DELETE);
+                break;
+            case 5:
+                FSMOD = MOD_ALT;
+                VK = 'H';
+				AddKeyPress(INPUTS, VK_LEFT);
+                break;
+            case 6:
+                FSMOD = MOD_ALT;
+                VK = 'J';
+                AddKeyPress(INPUTS, VK_DOWN);
+                break;
+            case 7:
+                FSMOD = MOD_ALT;
+                VK = 'K';
+                AddKeyPress(INPUTS, VK_UP);
+                break;
+            case 8:
+                FSMOD = MOD_ALT;
+                VK = 'L';
+                AddKeyPress(INPUTS, VK_RIGHT);
+                break;
+            case 9:
+                FSMOD = MOD_ALT;
+                VK = '9';
+                AddKeyPress(INPUTS, VK_VOLUME_UP);
         }
 
 
@@ -88,18 +162,14 @@ int _tmain()
         }
     }
 
-    // Wait until all threads have terminated.
-
     WaitForMultipleObjects(MAX_THREADS, hThreadArray, TRUE, INFINITE);
-
-    // Close all thread handles and free memory allocations.
 
     for (int i = 0; i < MAX_THREADS; i++)
     {
         CloseHandle(hThreadArray[i]);
         if (pHotkey[i] != NULL)
         {
-            HeapFree(GetProcessHeap(), 0, pHotkey[i]);
+            delete pHotkey[i];
             pHotkey[i] = NULL;    // Ensure address is not reused.
         }
     }
@@ -125,20 +195,28 @@ DWORD WINAPI HotkeyThread(LPVOID lpParam)
     {
         scprintf(hStdout, TEXT("id = %d\nfsModifiers = %d\nvk = %d\n\n"),
             pHotkey->id, pHotkey->fsModifiers, pHotkey->vk);
-        // _tprintf(_T("Hotkey 'ALT+b' registered, using MOD_NOREPEAT flag\n"));
+    }
+    
+	// unpress modifier keys before sending inputs, and send key down after
+    std::vector<WORD> modVks;
+    if (pHotkey->fsModifiers & MOD_ALT) modVks.push_back(VK_MENU);
+    if (pHotkey->fsModifiers & MOD_CONTROL) modVks.push_back(VK_CONTROL);
+    if (pHotkey->fsModifiers & MOD_SHIFT) modVks.push_back(VK_SHIFT);
+    if (pHotkey->fsModifiers & MOD_WIN) modVks.push_back(VK_LWIN);
+
+    for (auto it = modVks.rbegin(); it != modVks.rend(); ++it)
+    {
+        INPUT input = {};
+        input.type = INPUT_KEYBOARD;
+        input.ki.wVk = *it;
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+        pHotkey->inputs.insert(pHotkey->inputs.begin(), input);
     }
 
-    INPUT test[1] = {};
-    ZeroMemory(test, sizeof(test));
-    test[0].type = INPUT_KEYBOARD;
-    test[0].ki.wVk = VK_MENU;
-    test[0].ki.dwFlags = KEYEVENTF_KEYUP;
-
-    INPUT down[1] = {};
-    ZeroMemory(down, sizeof(down));
-    down[0].type = INPUT_KEYBOARD;
-    down[0].ki.wVk = VK_MENU;
-
+    for (WORD vk : modVks)
+    {
+        AddKeyInput(pHotkey->inputs, vk, false);
+    }
 
     INPUT* inputs = pHotkey->inputs.data();
     MSG msg = { 0 };
@@ -147,16 +225,13 @@ DWORD WINAPI HotkeyThread(LPVOID lpParam)
         if (msg.message == WM_HOTKEY)
         {
             scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
-            // _tprintf(_T("WM_HOTKEY received\n"));
 
 			UINT cInputs = (UINT)pHotkey->inputs.size();
-            SendInput(1, test, sizeof(INPUT));
             UINT uSent = SendInput(cInputs, inputs, sizeof(INPUT));
             if (uSent != cInputs)
             {
                 scprintf(hStdout, TEXT("SendInput failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
             }
-            SendInput(1, down, sizeof(INPUT));
         }
     }
 
