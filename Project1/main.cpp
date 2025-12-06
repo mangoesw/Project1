@@ -3,75 +3,14 @@
 #include <tchar.h>
 #include <strsafe.h>
 #include <vector>
+#include "HotkeyConfig.h"
 
 constexpr auto MAX_THREADS = 10;
 constexpr auto BUF_SIZE = 255;
-#define FSMOD pHotkey[i]->fsModifiers
-#define VK pHotkey[i]->vk
-#define INPUTS pHotkey[i]->inputs
 
 DWORD WINAPI HotkeyThread(LPVOID lpParam);
 void ErrorHandler(LPCTSTR lpszFunction);
 void scprintf(HANDLE hStdout, LPCTSTR format, ...);
-
-
-typedef struct Hotkey {
-    int id;
-    UINT fsModifiers;
-    UINT vk;
-	std::vector<INPUT> inputs;
-} HOTKEY, * PHOTKEY;
-
-
-void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp = false)
-{
-    INPUT input = {};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
-    inputs.push_back(input);
-}
-void AddKeyPress(std::vector<INPUT>& inputs, WORD vk)
-{
-    AddKeyInput(inputs, vk, false);
-    AddKeyInput(inputs, vk, true);
-}
-
-void AddUnicodeInput(std::vector<INPUT>& inputs, WCHAR wch, bool keyUp = false)
-{
-    INPUT input = {};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = 0;
-    input.ki.wScan = wch;
-    input.ki.dwFlags = KEYEVENTF_UNICODE | (keyUp ? KEYEVENTF_KEYUP : 0);
-    inputs.push_back(input);
-}
-void AddUnicodeChar(std::vector<INPUT>& inputs, WCHAR wch)
-{
-    AddUnicodeInput(inputs, wch, false);
-    AddUnicodeInput(inputs, wch, true);
-}
-void AddUnicodeString(std::vector<INPUT>& inputs, LPCWSTR str)
-{
-    while (*str)
-    {
-        WCHAR wch = *str++;
-        // Handle surrogate pairs for characters outside BMP (> U+FFFF)
-        if (wch >= 0xD800 && wch <= 0xDBFF && *str >= 0xDC00 && *str <= 0xDFFF)
-        {
-            // High surrogate followed by low surrogate
-            AddUnicodeInput(inputs, wch, false);
-            AddUnicodeInput(inputs, *str, false);
-            AddUnicodeInput(inputs, *str, true);
-            AddUnicodeInput(inputs, wch, true);
-            str++;
-        }
-        else
-        {
-            AddUnicodeChar(inputs, wch);
-        }
-    }
-}
 
 
 int _tmain()
@@ -92,58 +31,7 @@ int _tmain()
             ExitProcess(2);
         }
 
-		pHotkey[i]->id = i;
-        switch (i) {
-            case 0:
-                FSMOD = MOD_ALT;
-				VK = VK_OEM_6;
-				AddUnicodeString(INPUTS, L"=");
-                break;
-            case 1:
-                FSMOD = MOD_ALT | MOD_SHIFT;
-				VK = VK_OEM_4;
-                AddUnicodeString(INPUTS, L"+");
-				break;
-            case 2:
-                FSMOD = MOD_ALT;
-                VK = VK_BACK;
-				AddUnicodeString(INPUTS, L"\\");
-                break;
-            case 3:
-				FSMOD = MOD_ALT | MOD_SHIFT;
-				VK = VK_BACK;
-                AddUnicodeString(INPUTS, L"|");
-				break;
-            case 4:
-                FSMOD = MOD_ALT;
-                VK = VK_SNAPSHOT;
-				AddKeyPress(INPUTS, VK_DELETE);
-                break;
-            case 5:
-                FSMOD = MOD_ALT;
-                VK = 'H';
-				AddKeyPress(INPUTS, VK_LEFT);
-                break;
-            case 6:
-                FSMOD = MOD_ALT;
-                VK = 'J';
-                AddKeyPress(INPUTS, VK_DOWN);
-                break;
-            case 7:
-                FSMOD = MOD_ALT;
-                VK = 'K';
-                AddKeyPress(INPUTS, VK_UP);
-                break;
-            case 8:
-                FSMOD = MOD_ALT;
-                VK = 'L';
-                AddKeyPress(INPUTS, VK_RIGHT);
-                break;
-            case 9:
-                FSMOD = MOD_ALT;
-                VK = '9';
-                AddKeyPress(INPUTS, VK_VOLUME_UP);
-        }
+        ConfigureHotkey(pHotkey[i], i);
 
 
         hThreadArray[i] = CreateThread(
