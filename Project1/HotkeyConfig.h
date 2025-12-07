@@ -9,6 +9,11 @@ typedef struct Hotkey {
     std::vector<INPUT> inputs;
 } HOTKEY, * PHOTKEY;
 
+typedef struct RegisteredHotkeyInfo {
+    UINT fsModifiers;
+    UINT vk;
+} REGISTERED_HOTKEY_INFO;
+
 void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp = false);
 void AddKeyPress(std::vector<INPUT>& inputs, WORD vk);
 void AddUnicodeInput(std::vector<INPUT>& inputs, WCHAR wch, bool keyUp = false);
@@ -16,3 +21,6 @@ void AddUnicodeChar(std::vector<INPUT>& inputs, WCHAR wch);
 void AddUnicodeString(std::vector<INPUT>& inputs, LPCWSTR str);
 
 void ConfigureHotkey(PHOTKEY pHotkey, int index);
+
+void RegisterHotkeyForBlocking(UINT fsModifiers, UINT vk);
+bool ShouldBlockKey(UINT vk);

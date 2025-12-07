@@ -1,6 +1,7 @@
 // the base: https://learn.microsoft.com/en-us/windows/win32/procthread/creating-threads
 #include "Hook.h"
 #include "HotkeyConfig.h"
+#include "Util.h"
 #include <new>
 #include <strsafe.h>
 #include <system_error>
@@ -11,13 +12,9 @@
 
 constexpr auto HOTKEY_THREADS = 10;
 constexpr auto THREADS = HOTKEY_THREADS + 1;
-constexpr auto BUF_SIZE = 255;
 
 void HotkeyThread(PHOTKEY pHotkey);
 void HookThread();
-void ErrorHandler(LPCTSTR lpszFunction);
-void scprintf(HANDLE hStdout, LPCTSTR format, ...);
-
 
 int _tmain()
 {
@@ -76,11 +73,12 @@ int _tmain()
 
 void HotkeyThread(PHOTKEY pHotkey)
 {
-    HANDLE hStdout;
-
-    hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hStdout == INVALID_HANDLE_VALUE)
+    {
+        ErrorHandler(TEXT("GetStdHandle"));
         return;
+    }
 
     if (RegisterHotKey(
         NULL,
@@ -88,6 +86,8 @@ void HotkeyThread(PHOTKEY pHotkey)
         pHotkey->fsModifiers,
         pHotkey->vk))
     {
+        RegisterHotkeyForBlocking(pHotkey->fsModifiers, pHotkey->vk);
+        
         scprintf(hStdout, TEXT("id = %d\nfsModifiers = %d\nvk = %d\n\n"),
             pHotkey->id, pHotkey->fsModifiers, pHotkey->vk);
     }
@@ -121,20 +121,21 @@ void HotkeyThread(PHOTKEY pHotkey)
     }
 
     INPUT* inputs = pHotkey->inputs.data();
+    UINT cInputs = (UINT)pHotkey->inputs.size();
+
     MSG msg = { 0 };
     while (GetMessage(&msg, NULL, 0, 0) != 0)
     {
         if (msg.message == WM_HOTKEY)
         {
-            scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
-
-			UINT cInputs = (UINT)pHotkey->inputs.size();
             UINT uSent = SendInput(cInputs, inputs, sizeof(INPUT));
             if (uSent != cInputs)
             {
                 scprintf(hStdout, TEXT("SendInput failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
 				ErrorHandler(TEXT("SendInput"));
             }
+
+            scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
         }
     }
 }
@@ -148,8 +149,9 @@ void HookThread()
         if (hStdout != INVALID_HANDLE_VALUE)
         {
             scprintf(hStdout, TEXT("SetWindowsHookEx failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
-			ErrorHandler(TEXT("SetWindowsHookEx"));
+            ErrorHandler(TEXT("SetWindowsHookEx"));
         }
+        else { ErrorHandler(TEXT("GetStdHandle")); }
         return;
     }
 
@@ -159,56 +161,6 @@ void HookThread()
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
-
+    
     UnhookWindowsHookEx(hHook);
-}
-
-
-void ErrorHandler(LPCTSTR lpszFunction)
-{
-    // Retrieve the system error message for the last-error code.
-
-    LPVOID lpMsgBuf;
-    LPVOID lpDisplayBuf;
-    DWORD dw = GetLastError();
-
-    FormatMessage(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER |
-        FORMAT_MESSAGE_FROM_SYSTEM |
-        FORMAT_MESSAGE_IGNORE_INSERTS,
-        NULL,
-        dw,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        (LPTSTR)&lpMsgBuf,
-        0, NULL);
-
-    // Display the error message.
-
-    lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT,
-        (lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR));
-    StringCchPrintf((LPTSTR)lpDisplayBuf,
-        LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-        TEXT("%s failed with error %d: %s"),
-        lpszFunction, dw, lpMsgBuf);
-    MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK);
-
-    // Free error-handling buffer allocations.
-
-    LocalFree(lpMsgBuf);
-    LocalFree(lpDisplayBuf);
-}
-
-void scprintf(HANDLE hStdout, LPCTSTR format, ...)
-{
-    TCHAR msgBuf[BUF_SIZE];
-    size_t cchStringSize;
-    DWORD dwChars;
-    va_list args;
-
-    va_start(args, format);
-    StringCchVPrintf(msgBuf, BUF_SIZE, format, args);
-    va_end(args);
-
-    StringCchLength(msgBuf, BUF_SIZE, &cchStringSize);
-    WriteConsole(hStdout, msgBuf, (DWORD)cchStringSize, &dwChars, NULL);
 }
