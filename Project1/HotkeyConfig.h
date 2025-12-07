@@ -1,6 +1,6 @@
 #pragma once
-#include <windows.h>
 #include <vector>
+#include <windows.h>
 
 typedef struct Hotkey {
     int id;
