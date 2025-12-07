@@ -1,4 +1,6 @@
 #include "HotkeyConfig.h"
+#include <windows.h>
+#include <vector>
 
 void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp)
 {

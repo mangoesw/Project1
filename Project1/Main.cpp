@@ -1,47 +1,61 @@
 // https://learn.microsoft.com/en-us/windows/win32/procthread/creating-threads
+
+#include "HotkeyConfig.h"
+#include "Hook.h"
 #include <windows.h>
 #include <tchar.h>
 #include <strsafe.h>
 #include <vector>
-#include "HotkeyConfig.h"
 
-constexpr auto MAX_THREADS = 10;
+constexpr auto HOTKEY_THREADS = 10;
+constexpr auto THREADS = HOTKEY_THREADS + 1;
 constexpr auto BUF_SIZE = 255;
 
 DWORD WINAPI HotkeyThread(LPVOID lpParam);
+DWORD WINAPI HookThread(LPVOID lpParam);
 void ErrorHandler(LPCTSTR lpszFunction);
 void scprintf(HANDLE hStdout, LPCTSTR format, ...);
 
 
 int _tmain()
 {
-    PHOTKEY pHotkey[MAX_THREADS];
-    DWORD   dwThreadIdArray[MAX_THREADS];
-    HANDLE  hThreadArray[MAX_THREADS];
+    PHOTKEY pHotkey[HOTKEY_THREADS];
+    DWORD   dwThreadIdArray[THREADS];
+    HANDLE  hThreadArray[THREADS];
 
-    for (int i = 0; i < MAX_THREADS; i++)
+    for (int i = 0; i < THREADS; ++i)
     {
-        pHotkey[i] = new HOTKEY();
-
-        if (pHotkey[i] == NULL)
+        if (i == THREADS - 1)
         {
-            // If the array allocation fails, the system is out of memory
-            // so there is no point in trying to print an error message.
-            // Just terminate execution.
-            ExitProcess(2);
+            hThreadArray[i] = CreateThread(
+                NULL,
+                0,
+                HookThread,
+                NULL,
+                0,
+                &dwThreadIdArray[i]);
         }
+        else
+        {
+            pHotkey[i] = new HOTKEY();
+            if (pHotkey[i] == NULL)
+            {
+                // If the array allocation fails, the system is out of memory
+                // so there is no point in trying to print an error message.
+                // Just terminate execution.
+                ExitProcess(2);
+            }
 
-        ConfigureHotkey(pHotkey[i], i);
+            ConfigureHotkey(pHotkey[i], i);
 
-
-        hThreadArray[i] = CreateThread(
-            NULL,                   // default security attributes
-            0,                      // use default stack size  
-            HotkeyThread,       // thread function name
-            pHotkey[i],          // argument to thread function 
-            0,                      // use default creation flags 
-            &dwThreadIdArray[i]);   // returns the thread identifier 
-
+            hThreadArray[i] = CreateThread(
+                NULL,                   // default security attributes
+                0,                      // use default stack size  
+                HotkeyThread,       // thread function name
+                pHotkey[i],          // argument to thread function 
+                0,                      // use default creation flags 
+                &dwThreadIdArray[i]);   // returns the thread identifier 
+        }
 
         if (hThreadArray[i] == NULL)
         {
@@ -50,11 +64,14 @@ int _tmain()
         }
     }
 
-    WaitForMultipleObjects(MAX_THREADS, hThreadArray, TRUE, INFINITE);
+    WaitForMultipleObjects(THREADS, hThreadArray, TRUE, INFINITE);
 
-    for (int i = 0; i < MAX_THREADS; i++)
+    for (int i = 0; i < THREADS; ++i)
     {
         CloseHandle(hThreadArray[i]);
+
+        if (i == THREADS - 1) { break; }
+
         if (pHotkey[i] != NULL)
         {
             delete pHotkey[i];
@@ -126,6 +143,24 @@ DWORD WINAPI HotkeyThread(LPVOID lpParam)
     return 0;
 }
 
+DWORD WINAPI HookThread(LPVOID lpParam) // useless param
+{
+    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, NULL, 0);
+    if (hHook == NULL)
+    {
+        return 1;
+    }
+
+    MSG msg;
+    while (GetMessage(&msg, NULL, 0, 0) != 0)
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    UnhookWindowsHookEx(hHook);
+    return 0;
+}
 
 
 void ErrorHandler(LPCTSTR lpszFunction)
