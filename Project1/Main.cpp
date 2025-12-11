@@ -2,165 +2,72 @@
 #include "Hook.h"
 #include "HotkeyConfig.h"
 #include "Util.h"
-#include <new>
 #include <strsafe.h>
 #include <system_error>
-#include <tchar.h>
+//#include <tchar.h>
 #include <thread>
 #include <vector>
 #include <windows.h>
 
-constexpr auto HOTKEY_THREADS = 10;
-constexpr auto THREADS = HOTKEY_THREADS + 1;
+constexpr auto THREADS = 1;
 
-void HotkeyThread(PHOTKEY pHotkey);
 void HookThread();
 
-int _tmain()
+int main()
 {
-    PHOTKEY pHotkey[HOTKEY_THREADS] = {};
-    std::vector<std::thread> threads;
-    threads.reserve(THREADS);
+	std::vector<std::thread> threads;
+	threads.reserve(THREADS);
 
-    try
-    {
-        for (int i = 0; i < THREADS; ++i)
-        {
-            if (i == THREADS - 1)
-            {
-                threads.emplace_back(HookThread);
-            }
-            else
-            {
-                pHotkey[i] = new HOTKEY();
+	try
+	{
+		for (int i = 0; i < THREADS; ++i)
+		{
+			threads.emplace_back(HookThread);
+		}
+	}
+	catch (const std::system_error&)
+	{
+		ErrorHandler(TEXT("std::thread creation"));
+		ExitProcess(3);
+	}
 
-                ConfigureHotkey(pHotkey[i], i);
+	for (auto& t : threads)
+	{
+		if (t.joinable())
+		{
+			t.join();
+		}
+	}
 
-                threads.emplace_back(HotkeyThread, pHotkey[i]);
-            }
-        }
-    }
-    catch (const std::bad_alloc&)
-    {
-        ExitProcess(2);
-    }
-    catch (const std::system_error&)
-    {
-        ErrorHandler(TEXT("std::thread creation"));
-        ExitProcess(3);
-    }
 
-    for (auto& t : threads)
-    {
-        if (t.joinable())
-        {
-            t.join();
-        }
-    }
-
-    for (int i = 0; i < HOTKEY_THREADS; ++i)
-    {
-        if (pHotkey[i] != NULL)
-        {
-            delete pHotkey[i];
-            pHotkey[i] = NULL;    // Ensure address is not reused.
-        }
-    }
-
-    return 0;
+	return 0;
 }
 
-
-void HotkeyThread(PHOTKEY pHotkey)
-{
-    HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hStdout == INVALID_HANDLE_VALUE)
-    {
-        ErrorHandler(TEXT("GetStdHandle"));
-        return;
-    }
-
-    if (RegisterHotKey(
-        NULL,
-        pHotkey->id,
-        pHotkey->fsModifiers,
-        pHotkey->vk))
-    {
-        RegisterHotkeyForBlocking(pHotkey->fsModifiers, pHotkey->vk);
-        
-        scprintf(hStdout, TEXT("id = %d\nfsModifiers = %d\nvk = %d\n\n"),
-            pHotkey->id, pHotkey->fsModifiers, pHotkey->vk);
-    }
-    else
-    {
-        scprintf(hStdout, TEXT("RegisterHotKey failed for id %d: 0x%x\n"),
-            pHotkey->id, HRESULT_FROM_WIN32(GetLastError()));
-		ErrorHandler(TEXT("RegisterHotKey"));
-        return;
-    }
-    
-	// unpress modifier keys before sending inputs, and send key down after
-    std::vector<WORD> modVks;
-    if (pHotkey->fsModifiers & MOD_ALT) modVks.push_back(VK_MENU);
-    if (pHotkey->fsModifiers & MOD_CONTROL) modVks.push_back(VK_CONTROL);
-    if (pHotkey->fsModifiers & MOD_SHIFT) modVks.push_back(VK_SHIFT);
-    if (pHotkey->fsModifiers & MOD_WIN) modVks.push_back(VK_LWIN);
-
-    for (auto it = modVks.rbegin(); it != modVks.rend(); ++it)
-    {
-        INPUT input = {};
-        input.type = INPUT_KEYBOARD;
-        input.ki.wVk = *it;
-        input.ki.dwFlags = KEYEVENTF_KEYUP;
-        pHotkey->inputs.insert(pHotkey->inputs.begin(), input);
-    }
-
-    for (WORD vk : modVks)
-    {
-        AddKeyInput(pHotkey->inputs, vk, false);
-    }
-
-    INPUT* inputs = pHotkey->inputs.data();
-    UINT cInputs = (UINT)pHotkey->inputs.size();
-
-    MSG msg = { 0 };
-    while (GetMessage(&msg, NULL, 0, 0) != 0)
-    {
-        if (msg.message == WM_HOTKEY)
-        {
-            UINT uSent = SendInput(cInputs, inputs, sizeof(INPUT));
-            if (uSent != cInputs)
-            {
-                scprintf(hStdout, TEXT("SendInput failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
-				ErrorHandler(TEXT("SendInput"));
-            }
-
-            scprintf(hStdout, TEXT("%d\n"), pHotkey->id);
-        }
-    }
-}
 
 void HookThread()
 {
-    HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, NULL, 0);
-    if (hHook == NULL)
-    {
-        HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
-        if (hStdout != INVALID_HANDLE_VALUE)
-        {
-            scprintf(hStdout, TEXT("SetWindowsHookEx failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
-            ErrorHandler(TEXT("SetWindowsHookEx"));
-        }
-        else { ErrorHandler(TEXT("GetStdHandle")); }
-        return;
-    }
+	HHOOK hHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, NULL, 0);
+	if (hHook == NULL)
+	{
+		HANDLE hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+		if (hStdout != INVALID_HANDLE_VALUE)
+		{
+			scprintf(hStdout, TEXT("SetWindowsHookEx failed: 0x%x\n"), HRESULT_FROM_WIN32(GetLastError()));
+			ErrorHandler(TEXT("SetWindowsHookEx"));
+		}
+		else
+		{ 
+			ErrorHandler(TEXT("GetStdHandle"));
+		}
+		return;
+	}
 
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0) != 0)
-    {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-    
-    UnhookWindowsHookEx(hHook);
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0) != 0)
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+	
+	UnhookWindowsHookEx(hHook);
 }

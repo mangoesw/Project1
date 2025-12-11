@@ -3,160 +3,57 @@
 #include <vector>
 #include <windows.h>
 
-static std::vector<REGISTERED_HOTKEY_INFO> g_registeredHotkeys;
-static std::mutex g_hotkeyMutex;
-
-void RegisterHotkeyForBlocking(UINT fsModifiers, UINT vk)
-{
-    std::lock_guard<std::mutex> lock(g_hotkeyMutex);
-    REGISTERED_HOTKEY_INFO info = { fsModifiers, vk };
-    g_registeredHotkeys.push_back(info);
-}
-
-static bool IsModifierPressed(UINT mod)
-{
-    if (mod & MOD_ALT)
-    {
-        if (!(GetAsyncKeyState(VK_MENU) & 0x8000))
-            return false;
-    }
-    if (mod & MOD_CONTROL)
-    {
-        if (!(GetAsyncKeyState(VK_CONTROL) & 0x8000))
-            return false;
-    }
-    if (mod & MOD_SHIFT)
-    {
-        if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000))
-            return false;
-    }
-    if (mod & MOD_WIN)
-    {
-        if (!(GetAsyncKeyState(VK_LWIN) & 0x8000) && !(GetAsyncKeyState(VK_RWIN) & 0x8000))
-            return false;
-    }
-    return true;
-}
-
-bool ShouldBlockKey(UINT vk)
-{
-    std::lock_guard<std::mutex> lock(g_hotkeyMutex);
-    for (const auto& hotkey : g_registeredHotkeys)
-    {
-        if (hotkey.vk == vk && hotkey.fsModifiers != 0 && IsModifierPressed(hotkey.fsModifiers))
-        {
-            return true;
-        }
-    }
-    return false;
-}
 
 void AddKeyInput(std::vector<INPUT>& inputs, WORD vk, bool keyUp)
 {
-    INPUT input = {};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = vk;
-    input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
-    inputs.push_back(input);
+	INPUT input = {};
+	input.type = INPUT_KEYBOARD;
+	input.ki.wVk = vk;
+	input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
+	inputs.push_back(input);
 }
 
 void AddKeyPress(std::vector<INPUT>& inputs, WORD vk)
 {
-    AddKeyInput(inputs, vk, false);
-    AddKeyInput(inputs, vk, true);
+	AddKeyInput(inputs, vk, false);
+	AddKeyInput(inputs, vk, true);
 }
 
 void AddUnicodeInput(std::vector<INPUT>& inputs, WCHAR wch, bool keyUp)
 {
-    INPUT input = {};
-    input.type = INPUT_KEYBOARD;
-    input.ki.wVk = 0;
-    input.ki.wScan = wch;
-    input.ki.dwFlags = KEYEVENTF_UNICODE | (keyUp ? KEYEVENTF_KEYUP : 0);
-    inputs.push_back(input);
+	INPUT input = {};
+	input.type = INPUT_KEYBOARD;
+	input.ki.wVk = 0;
+	input.ki.wScan = wch;
+	input.ki.dwFlags = KEYEVENTF_UNICODE | (keyUp ? KEYEVENTF_KEYUP : 0);
+	inputs.push_back(input);
 }
 
 void AddUnicodeChar(std::vector<INPUT>& inputs, WCHAR wch)
 {
-    AddUnicodeInput(inputs, wch, false);
-    AddUnicodeInput(inputs, wch, true);
+	AddUnicodeInput(inputs, wch, false);
+	AddUnicodeInput(inputs, wch, true);
 }
 
 void AddUnicodeString(std::vector<INPUT>& inputs, LPCWSTR str)
 {
-    while (*str)
-    {
-        WCHAR wch = *str++;
-        // Handle surrogate pairs for characters outside BMP (> U+FFFF)
-        if (wch >= 0xD800 && wch <= 0xDBFF && *str >= 0xDC00 && *str <= 0xDFFF)
-        {
-            // High surrogate followed by low surrogate
-            AddUnicodeInput(inputs, wch, false);
-            AddUnicodeInput(inputs, *str, false);
-            AddUnicodeInput(inputs, *str, true);
-            AddUnicodeInput(inputs, wch, true);
-            str++;
-        }
-        else
-        {
-            AddUnicodeChar(inputs, wch);
-        }
-    }
+	while (*str)
+	{
+		WCHAR wch = *str++;
+		// Handle surrogate pairs for characters outside BMP (> U+FFFF)
+		if (wch >= 0xD800 && wch <= 0xDBFF && *str >= 0xDC00 && *str <= 0xDFFF)
+		{
+			// High surrogate followed by low surrogate
+			AddUnicodeInput(inputs, wch, false);
+			AddUnicodeInput(inputs, *str, false);
+			AddUnicodeInput(inputs, *str, true);
+			AddUnicodeInput(inputs, wch, true);
+			str++;
+		}
+		else
+		{
+			AddUnicodeChar(inputs, wch);
+		}
+	}
 }
 
-void ConfigureHotkey(PHOTKEY pHotkey, int index)
-{
-    pHotkey->id = index;
-    switch (index) {
-        case 0:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = VK_OEM_6;
-            AddUnicodeString(pHotkey->inputs, L"=");
-            break;
-        case 1:
-            pHotkey->fsModifiers = MOD_ALT | MOD_SHIFT;
-            pHotkey->vk = VK_OEM_6;
-            AddUnicodeString(pHotkey->inputs, L"+");
-            break;
-        case 2:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = VK_BACK;
-            AddUnicodeString(pHotkey->inputs, L"\\");
-            break;
-        case 3:
-            pHotkey->fsModifiers = MOD_ALT | MOD_SHIFT;
-            pHotkey->vk = VK_BACK;
-            AddUnicodeString(pHotkey->inputs, L"|");
-            break;
-        case 4:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = VK_HOME;
-            AddKeyPress(pHotkey->inputs, VK_DELETE);
-            break;
-        case 5:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = 'H';
-            AddKeyPress(pHotkey->inputs, VK_LEFT);
-            break;
-        case 6:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = 'J';
-            AddKeyPress(pHotkey->inputs, VK_DOWN);
-            break;
-        case 7:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = 'K';
-            AddKeyPress(pHotkey->inputs, VK_UP);
-            break;
-        case 8:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = 'L';
-            AddKeyPress(pHotkey->inputs, VK_RIGHT);
-            break;
-        case 9:
-            pHotkey->fsModifiers = MOD_ALT;
-            pHotkey->vk = '9';
-            AddKeyPress(pHotkey->inputs, VK_VOLUME_UP);
-            break;
-    }
-}
